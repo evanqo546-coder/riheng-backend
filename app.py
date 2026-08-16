@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 
@@ -8,6 +9,16 @@ from flask import Flask, jsonify, request
 app = Flask(__name__)
 
 MODEL_NAME = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
+
+# 獨立的日誌檔案，只記錄這個 App 自己的事件，跟公司系統（extinguisher_system）
+# 共用同一個 PythonAnywhere Web App，但 log 完全分開、互不干擾。
+LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.log")
+logger = logging.getLogger("riheng_backend")
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    _file_handler = logging.FileHandler(LOG_PATH)
+    _file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    logger.addHandler(_file_handler)
 
 PROMPT_INSTRUCTIONS = """你是一位營養師助手，任務是根據使用者提供的餐點描述和/或照片，估算這一餐的營養資訊。
 
@@ -44,12 +55,18 @@ def ping():
 def estimate_meal():
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
+        logger.error("ANTHROPIC_API_KEY 未設定")
         return jsonify({"error": "伺服器尚未設定 ANTHROPIC_API_KEY"}), 500
 
     data = request.get_json(silent=True) or {}
     description = (data.get("description") or "").strip()
     photo_base64 = data.get("photo_base64")
     photo_media_type = data.get("photo_media_type", "image/jpeg")
+
+    logger.info(
+        "收到 /estimate-meal 請求：has_description=%s has_photo=%s",
+        bool(description), bool(photo_base64),
+    )
 
     if not description and not photo_base64:
         return jsonify({"error": "請至少提供文字描述或照片"}), 400
@@ -77,6 +94,7 @@ def estimate_meal():
             messages=[{"role": "user", "content": content}],
         )
     except Exception as exc:  # 直接把上游錯誤原因回傳給前端方便除錯
+        logger.error("呼叫 Claude API 失敗：%s", exc)
         return jsonify({"error": f"呼叫 Claude API 失敗：{exc}"}), 502
 
     raw_text = "".join(
@@ -85,8 +103,10 @@ def estimate_meal():
     try:
         result = extract_json(raw_text)
     except (ValueError, json.JSONDecodeError) as exc:
+        logger.error("無法解析模型回應：%s | raw=%s", exc, raw_text)
         return jsonify({"error": f"無法解析模型回應：{exc}", "raw": raw_text}), 502
 
+    logger.info("估算成功：total_calories=%s", result.get("total_calories"))
     return jsonify(result)
 
 
