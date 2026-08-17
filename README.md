@@ -5,7 +5,8 @@
 ## 端點
 
 - `GET /ping`：健康檢查，回傳 `{"status": "ok"}`
-- `POST /estimate-meal`：估算餐點營養
+- `POST /estimate-meal`：估算餐點營養（需要驗證，見下方）
+  - 必要 request header：`X-App-Secret: <BACKEND_SHARED_SECRET>`，不符合會回 401
   - 請求 body（JSON）：
     ```json
     {
@@ -27,6 +28,12 @@
     }
     ```
 
+## 環境變數（設定在部署環境，不進 Git repo）
+
+- `ANTHROPIC_API_KEY`：Anthropic Claude API 金鑰
+- `BACKEND_SHARED_SECRET`：呼叫端（App）需要在 `X-App-Secret` header 帶上同一組值才能通過驗證，沒設定這個環境變數的話所有請求都會被拒絕（500）
+- `ANTHROPIC_MODEL`（可選）：預設 `claude-sonnet-5`
+
 ## PythonAnywhere 部署步驟（免費方案，跟現有 Web App 共用一個網址、用路徑分流）
 
 1. 打開 PythonAnywhere 的 **Bash console**，執行：
@@ -34,14 +41,24 @@
    cd ~
    git clone https://github.com/evanqo546-coder/riheng-backend.git
    ```
-2. 建立獨立的虛擬環境（跟公司系統用的環境分開，避免套件版本互相干擾）：
+2. 建立獨立的虛擬環境，或直接把套件裝進 Web App 實際使用的環境（哪一種取決於該 Web App 的 Virtualenv 設定，兩者擇一，不要搞混）：
    ```bash
-   mkvirtualenv --python=python3.10 riheng-backend-venv
    pip install -r ~/riheng-backend/requirements.txt
    ```
-   （如果 `mkvirtualenv` 指令找不到，改用 `python3.10 -m venv ~/.virtualenvs/riheng-backend-venv && source ~/.virtualenvs/riheng-backend-venv/bin/activate` 再執行 `pip install`）
-3. 到 PythonAnywhere 的 **Web** 分頁，找到現有的 Web App（`qo546.pythonanywhere.com`），點進去左下角 **WSGI configuration file** 的連結（就是 `/var/www/qo546_pythonanywhere_com_wsgi.py`）打開編輯。
-4. **這一步先暫停，把這個檔案目前的完整內容貼給我**，我會照你原本公司系統的寫法，幫你寫好合併路徑分流後的版本（讓 `qo546.pythonanywhere.com/health-api/...` 導到這支健康 App 的後端，其餘路徑維持原本公司系統的行為），你再貼回去存檔即可。
-5. Anthropic API 金鑰**只寫在這個 WSGI 檔案裡**（例如 `os.environ['ANTHROPIC_API_KEY'] = '你的金鑰'`），這個檔案完全不在任何 Git repo 裡，不會外流。
-6. 存檔後回到 **Web** 分頁，點綠色的 **Reload qo546.pythonanywhere.com** 按鈕。
-7. 測試：瀏覽器打開 `https://qo546.pythonanywhere.com/health-api/ping`，應該會看到 `{"status": "ok"}`。
+3. 到 PythonAnywhere 的 **Web** 分頁，找到現有的 Web App（`<your-username>.pythonanywhere.com`），打開 **WSGI configuration file**，加入路徑分流設定，讓 `/health-api/...` 導到這支後端、其餘路徑維持原本系統的行為。
+4. 在同一個 WSGI 檔案裡設定環境變數（這個檔案不在任何 Git repo 裡，不會外流）：
+   ```python
+   os.environ['ANTHROPIC_API_KEY'] = '你的 Anthropic 金鑰'
+   os.environ['BACKEND_SHARED_SECRET'] = '一組只有你自己知道的長字串'
+   ```
+5. 存檔後回到 **Web** 分頁，點 **Reload** 按鈕。
+6. 測試：
+   ```bash
+   curl https://<your-username>.pythonanywhere.com/health-api/ping
+   # 應該看到 {"status": "ok"}
+
+   curl -X POST https://<your-username>.pythonanywhere.com/health-api/estimate-meal \
+     -H "Content-Type: application/json" \
+     -H "X-App-Secret: 你設定的密鑰" \
+     -d '{"description": "一碗白飯"}'
+   ```

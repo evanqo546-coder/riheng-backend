@@ -53,6 +53,14 @@ def ping():
 
 @app.route("/estimate-meal", methods=["POST"])
 def estimate_meal():
+    shared_secret = os.environ.get("BACKEND_SHARED_SECRET")
+    if not shared_secret:
+        logger.error("BACKEND_SHARED_SECRET 未設定")
+        return jsonify({"error": "伺服器尚未設定 BACKEND_SHARED_SECRET"}), 500
+    if request.headers.get("X-App-Secret") != shared_secret:
+        logger.warning("拒絕未授權的請求：來源 IP=%s", request.remote_addr)
+        return jsonify({"error": "unauthorized"}), 401
+
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         logger.error("ANTHROPIC_API_KEY 未設定")
